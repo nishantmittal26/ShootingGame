@@ -1,0 +1,723 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Rail Shooter</title>
+    <meta name="description" content="A three.js rail shooter: fly, fight, and reach the finish line." />
+    <!-- Inline so the page makes no network request at all, keeping the game fully offline. -->
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23081422'/%3E%3Cpath d='M16 4l3 13 9 4v3l-9-2-1 5 3 3v2l-5-2-5 2v-2l3-3-1-5-9 2v-3l9-4z' fill='%235ff0ff'/%3E%3C/svg%3E"
+    />
+    <style>
+      :root {
+        --hud-cyan: #5ff0ff;
+        --hud-amber: #ffb638;
+        --hud-red: #ff4d5a;
+        --hud-green: #64ff9c;
+        --hud-magenta: #ff6bd6;
+        --hud-dim: rgba(220, 240, 255, 0.55);
+        --panel-bg: rgba(6, 14, 24, 0.55);
+        --panel-line: rgba(95, 240, 255, 0.28);
+        --ui-font: 'Segoe UI', 'Inter', system-ui, -apple-system, sans-serif;
+        --mono-font: 'Consolas', 'SFMono-Regular', ui-monospace, monospace;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        overflow: hidden;
+        background: #05080f;
+        color: #eaf4ff;
+        font-family: var(--ui-font);
+        -webkit-font-smoothing: antialiased;
+      }
+
+      #app {
+        position: fixed;
+        inset: 0;
+      }
+
+      #game-canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+        touch-action: none;
+      }
+
+      /* ---------- HUD ---------- */
+
+      #hud {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 0.25s ease;
+      }
+
+      #hud.visible {
+        opacity: 1;
+      }
+
+      .panel {
+        background: var(--panel-bg);
+        border: 1px solid var(--panel-line);
+        border-radius: 10px;
+        backdrop-filter: blur(6px);
+        padding: 10px 14px;
+      }
+
+      .label {
+        font-size: 10px;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--hud-dim);
+        margin-bottom: 5px;
+      }
+
+      /* Route progress, top centre */
+
+      #progress-wrap {
+        position: absolute;
+        top: 18px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: min(560px, 60vw);
+        text-align: center;
+      }
+
+      #progress-track {
+        position: relative;
+        height: 8px;
+        border-radius: 999px;
+        background: rgba(10, 24, 38, 0.75);
+        border: 1px solid var(--panel-line);
+        overflow: visible;
+      }
+
+      #progress-fill {
+        position: absolute;
+        inset: 0 auto 0 0;
+        width: 0%;
+        border-radius: 999px;
+        background: linear-gradient(90deg, var(--hud-cyan), var(--hud-amber));
+        box-shadow: 0 0 12px rgba(95, 240, 255, 0.5);
+        transition: width 0.12s linear;
+      }
+
+      #progress-marker {
+        position: absolute;
+        top: 50%;
+        left: 0%;
+        width: 0;
+        height: 0;
+        border-left: 8px solid var(--hud-cyan);
+        border-top: 5px solid transparent;
+        border-bottom: 5px solid transparent;
+        transform: translate(-2px, -50%);
+        filter: drop-shadow(0 0 6px rgba(95, 240, 255, 0.9));
+        transition: left 0.12s linear;
+      }
+
+      #progress-flag {
+        position: absolute;
+        right: -4px;
+        top: -7px;
+        width: 3px;
+        height: 22px;
+        background: repeating-linear-gradient(
+          180deg,
+          #fff 0 4px,
+          #111 4px 8px
+        );
+      }
+
+      #progress-caption {
+        margin-top: 7px;
+        font-family: var(--mono-font);
+        font-size: 11px;
+        letter-spacing: 0.14em;
+        color: var(--hud-dim);
+      }
+
+      /* Score, top left */
+
+      #score-panel {
+        position: absolute;
+        top: 18px;
+        left: 18px;
+        min-width: 132px;
+      }
+
+      #score-value {
+        font-family: var(--mono-font);
+        font-size: 26px;
+        font-weight: 600;
+        line-height: 1;
+        color: var(--hud-amber);
+        text-shadow: 0 0 14px rgba(255, 182, 56, 0.45);
+      }
+
+      #kills-value {
+        margin-top: 5px;
+        font-family: var(--mono-font);
+        font-size: 11px;
+        color: var(--hud-dim);
+      }
+
+      /* Vitals, bottom left */
+
+      #vitals-panel {
+        position: absolute;
+        bottom: 18px;
+        left: 18px;
+        width: 250px;
+      }
+
+      .bar-track {
+        height: 12px;
+        border-radius: 6px;
+        background: rgba(10, 24, 38, 0.8);
+        border: 1px solid var(--panel-line);
+        overflow: hidden;
+      }
+
+      .bar-fill {
+        height: 100%;
+        width: 100%;
+        border-radius: 5px;
+        transition: width 0.14s ease-out, background-color 0.3s ease;
+      }
+
+      #health-fill {
+        background: linear-gradient(90deg, #2fe08a, var(--hud-green));
+        box-shadow: 0 0 10px rgba(100, 255, 156, 0.4);
+      }
+
+      #health-fill.warn {
+        background: linear-gradient(90deg, #ff9d2f, var(--hud-amber));
+      }
+
+      #health-fill.critical {
+        background: linear-gradient(90deg, #ff2f45, var(--hud-red));
+        animation: pulse 0.7s ease-in-out infinite;
+      }
+
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.55;
+        }
+      }
+
+      #shield-row {
+        margin-top: 10px;
+      }
+
+      #shield-pips {
+        display: flex;
+        gap: 5px;
+      }
+
+      .shield-pip {
+        width: 22px;
+        height: 8px;
+        border-radius: 3px;
+        background: var(--hud-cyan);
+        box-shadow: 0 0 8px rgba(95, 240, 255, 0.6);
+      }
+
+      #shield-row.empty {
+        display: none;
+      }
+
+      /* Armament, bottom right */
+
+      #arms-panel {
+        position: absolute;
+        bottom: 18px;
+        right: 18px;
+        min-width: 190px;
+        text-align: right;
+      }
+
+      #weapon-tier {
+        display: flex;
+        gap: 5px;
+        justify-content: flex-end;
+      }
+
+      .tier-pip {
+        width: 30px;
+        height: 8px;
+        border-radius: 3px;
+        background: rgba(255, 255, 255, 0.14);
+      }
+
+      .tier-pip.on {
+        background: var(--hud-amber);
+        box-shadow: 0 0 9px rgba(255, 182, 56, 0.65);
+      }
+
+      #missile-row {
+        margin-top: 11px;
+        font-family: var(--mono-font);
+        font-size: 13px;
+        color: var(--hud-magenta);
+      }
+
+      #missile-row.empty {
+        color: rgba(255, 107, 214, 0.3);
+      }
+
+      #effects {
+        position: absolute;
+        bottom: 18px;
+        left: 50%;
+        transform: translateX(-50%);
+        display: flex;
+        gap: 8px;
+      }
+
+      .effect-chip {
+        min-width: 104px;
+        background: var(--panel-bg);
+        border: 1px solid var(--panel-line);
+        border-radius: 8px;
+        padding: 6px 9px 7px;
+        backdrop-filter: blur(6px);
+      }
+
+      .effect-chip .name {
+        font-size: 9px;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: var(--hud-dim);
+        margin-bottom: 4px;
+      }
+
+      .effect-chip .drain {
+        height: 4px;
+        border-radius: 2px;
+        background: rgba(255, 255, 255, 0.12);
+        overflow: hidden;
+      }
+
+      .effect-chip .drain span {
+        display: block;
+        height: 100%;
+        background: var(--hud-amber);
+        box-shadow: 0 0 8px rgba(255, 182, 56, 0.6);
+      }
+
+      /* Boss health, top centre under progress */
+
+      #boss-panel {
+        position: absolute;
+        top: 74px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: min(460px, 54vw);
+        text-align: center;
+        display: none;
+      }
+
+      #boss-panel.visible {
+        display: block;
+      }
+
+      #boss-name {
+        font-size: 11px;
+        letter-spacing: 0.28em;
+        text-transform: uppercase;
+        color: var(--hud-red);
+        margin-bottom: 6px;
+        text-shadow: 0 0 12px rgba(255, 77, 90, 0.5);
+      }
+
+      #boss-track {
+        height: 10px;
+        border-radius: 5px;
+        background: rgba(28, 8, 12, 0.8);
+        border: 1px solid rgba(255, 77, 90, 0.45);
+        overflow: hidden;
+      }
+
+      #boss-fill {
+        height: 100%;
+        width: 100%;
+        background: linear-gradient(90deg, #8b1020, var(--hud-red));
+        box-shadow: 0 0 14px rgba(255, 77, 90, 0.55);
+        transition: width 0.15s ease-out;
+      }
+
+      /* Crosshair */
+
+      #crosshair {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 34px;
+        height: 34px;
+        transform: translate(-50%, -50%);
+        opacity: 0.5;
+      }
+
+      #crosshair::before,
+      #crosshair::after {
+        content: '';
+        position: absolute;
+        background: var(--hud-cyan);
+      }
+
+      #crosshair::before {
+        left: 50%;
+        top: 0;
+        width: 1px;
+        height: 100%;
+        transform: translateX(-50%);
+      }
+
+      #crosshair::after {
+        top: 50%;
+        left: 0;
+        height: 1px;
+        width: 100%;
+        transform: translateY(-50%);
+      }
+
+      /* Damage vignette */
+
+      #vignette {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        opacity: 0;
+        background: radial-gradient(
+          ellipse at center,
+          rgba(255, 40, 60, 0) 42%,
+          rgba(255, 40, 60, 0.62) 100%
+        );
+      }
+
+      /* Toast messages */
+
+      #toast {
+        position: absolute;
+        top: 32%;
+        left: 50%;
+        transform: translateX(-50%);
+        font-size: 20px;
+        font-weight: 600;
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+        color: var(--hud-cyan);
+        text-shadow: 0 0 18px rgba(95, 240, 255, 0.7);
+        opacity: 0;
+        transition: opacity 0.2s ease;
+        white-space: nowrap;
+      }
+
+      /* ---------- Screens ---------- */
+
+      .screen {
+        position: absolute;
+        inset: 0;
+        display: none;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        /* Dark enough to keep text legible, light enough that the world still reads as a
+           live scene behind the menu rather than a black screen. */
+        background: radial-gradient(
+          ellipse at center,
+          rgba(6, 14, 26, 0.58) 0%,
+          rgba(3, 7, 14, 0.86) 100%
+        );
+        backdrop-filter: blur(2px);
+        padding: 24px;
+      }
+
+      .screen.visible {
+        display: flex;
+      }
+
+      .screen h1 {
+        margin: 0;
+        font-size: clamp(38px, 8vw, 78px);
+        font-weight: 800;
+        letter-spacing: 0.06em;
+        line-height: 1;
+        background: linear-gradient(180deg, #ffffff, var(--hud-cyan));
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+        filter: drop-shadow(0 0 26px rgba(95, 240, 255, 0.35));
+      }
+
+      .screen h2 {
+        margin: 0 0 6px;
+        font-size: clamp(28px, 6vw, 52px);
+        font-weight: 800;
+        letter-spacing: 0.05em;
+      }
+
+      #screen-gameover h2 {
+        color: var(--hud-red);
+        filter: drop-shadow(0 0 22px rgba(255, 77, 90, 0.4));
+      }
+
+      #screen-victory h2 {
+        color: var(--hud-green);
+        filter: drop-shadow(0 0 22px rgba(100, 255, 156, 0.4));
+      }
+
+      .tagline {
+        margin: 12px 0 30px;
+        font-size: 13px;
+        letter-spacing: 0.3em;
+        text-transform: uppercase;
+        color: var(--hud-dim);
+      }
+
+      .controls-grid {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        align-items: center;
+        gap: 10px 18px;
+        margin-bottom: 30px;
+        font-size: 13px;
+        text-align: left;
+      }
+
+      .controls-grid .keys {
+        display: flex;
+        gap: 4px;
+        justify-content: flex-end;
+      }
+
+      .controls-grid kbd {
+        display: inline-block;
+        min-width: 22px;
+        padding: 3px 7px;
+        border-radius: 5px;
+        background: rgba(95, 240, 255, 0.1);
+        border: 1px solid var(--panel-line);
+        border-bottom-width: 2px;
+        font-family: var(--mono-font);
+        font-size: 11px;
+        color: var(--hud-cyan);
+      }
+
+      .controls-grid span {
+        color: var(--hud-dim);
+        align-self: center;
+      }
+
+      .prompt {
+        font-size: 14px;
+        letter-spacing: 0.22em;
+        text-transform: uppercase;
+        color: var(--hud-amber);
+        animation: blink 1.5s ease-in-out infinite;
+      }
+
+      @keyframes blink {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.35;
+        }
+      }
+
+      .stats {
+        display: flex;
+        gap: 34px;
+        margin: 18px 0 30px;
+      }
+
+      .stat .stat-label {
+        font-size: 10px;
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+        color: var(--hud-dim);
+        margin-bottom: 6px;
+      }
+
+      .stat .stat-value {
+        font-family: var(--mono-font);
+        font-size: 30px;
+        font-weight: 600;
+        color: var(--hud-cyan);
+      }
+
+      .hint {
+        font-size: 11px;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: rgba(220, 240, 255, 0.32);
+        margin-top: 22px;
+      }
+
+      #loading {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #05080f;
+        font-size: 12px;
+        letter-spacing: 0.3em;
+        text-transform: uppercase;
+        color: var(--hud-dim);
+        z-index: 10;
+      }
+
+      #loading.hidden {
+        display: none;
+      }
+
+      #unsupported {
+        max-width: 460px;
+        line-height: 1.6;
+        font-size: 14px;
+        color: var(--hud-dim);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="game-canvas"></canvas>
+
+      <div id="hud">
+        <div id="progress-wrap">
+          <div id="progress-track">
+            <div id="progress-fill"></div>
+            <div id="progress-marker"></div>
+            <div id="progress-flag"></div>
+          </div>
+          <div id="progress-caption">SECTOR 0% &middot; 0 KM</div>
+        </div>
+
+        <div id="boss-panel">
+          <div id="boss-name">Heavy Gunship</div>
+          <div id="boss-track"><div id="boss-fill"></div></div>
+        </div>
+
+        <div id="score-panel" class="panel">
+          <div class="label">Score</div>
+          <div id="score-value">0</div>
+          <div id="kills-value">0 KILLS</div>
+        </div>
+
+        <div id="vitals-panel" class="panel">
+          <div class="label">Hull Integrity</div>
+          <div class="bar-track"><div id="health-fill" class="bar-fill"></div></div>
+          <div id="shield-row" class="empty">
+            <div class="label" style="margin-top: 9px">Shield</div>
+            <div id="shield-pips"></div>
+          </div>
+        </div>
+
+        <div id="arms-panel" class="panel">
+          <div class="label">Cannon</div>
+          <div id="weapon-tier">
+            <div class="tier-pip on"></div>
+            <div class="tier-pip"></div>
+            <div class="tier-pip"></div>
+          </div>
+          <div id="missile-row" class="empty">MISSILES 0</div>
+        </div>
+
+        <div id="effects"></div>
+        <div id="crosshair"></div>
+        <div id="vignette"></div>
+        <div id="toast"></div>
+      </div>
+
+      <div id="screen-title" class="screen">
+        <h1>RAIL SHOOTER</h1>
+        <div class="tagline">Clear the corridor &middot; Reach the finish line</div>
+        <div class="controls-grid">
+          <div class="keys">
+            <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd>
+          </div>
+          <span>Steer your plane</span>
+          <div class="keys"><kbd>Space</kbd></div>
+          <span>Fire cannon</span>
+          <div class="keys"><kbd>Shift</kbd></div>
+          <span>Launch homing missile</span>
+          <div class="keys"><kbd>P</kbd></div>
+          <span>Pause</span>
+          <div class="keys"><kbd>M</kbd></div>
+          <span>Mute audio</span>
+        </div>
+        <div class="prompt">Press Enter to launch</div>
+      </div>
+
+      <div id="screen-pause" class="screen">
+        <h2>PAUSED</h2>
+        <div class="tagline">Engines idling</div>
+        <div class="prompt">Press P to resume</div>
+        <div class="hint">Press Enter to abandon and restart</div>
+      </div>
+
+      <div id="screen-gameover" class="screen">
+        <h2>SHOT DOWN</h2>
+        <div class="tagline">Your plane went down before the finish line</div>
+        <div class="stats">
+          <div class="stat">
+            <div class="stat-label">Score</div>
+            <div class="stat-value" id="over-score">0</div>
+          </div>
+          <div class="stat">
+            <div class="stat-label">Kills</div>
+            <div class="stat-value" id="over-kills">0</div>
+          </div>
+          <div class="stat">
+            <div class="stat-label">Route</div>
+            <div class="stat-value" id="over-progress">0%</div>
+          </div>
+        </div>
+        <div class="prompt">Press Enter to fly again</div>
+      </div>
+
+      <div id="screen-victory" class="screen">
+        <h2>FINISH LINE</h2>
+        <div class="tagline">Corridor cleared &middot; Gunship destroyed</div>
+        <div class="stats">
+          <div class="stat">
+            <div class="stat-label">Score</div>
+            <div class="stat-value" id="win-score">0</div>
+          </div>
+          <div class="stat">
+            <div class="stat-label">Kills</div>
+            <div class="stat-value" id="win-kills">0</div>
+          </div>
+          <div class="stat">
+            <div class="stat-label">Time</div>
+            <div class="stat-value" id="win-time">0:00</div>
+          </div>
+        </div>
+        <div class="prompt">Press Enter to fly again</div>
+      </div>
+
+      <div id="loading">Initialising flight systems</div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
